@@ -1,4 +1,7 @@
 require('dotenv').config();
+const express = require('express');
+const app = express();
+app.use(express.json());
 const { startWakeWordListener } = require('./wake-word');
 const { transcribe, recordAudio } = require('./stt');
 const { speak, speakStream } = require('./tts');
@@ -155,5 +158,30 @@ async function boot() {
   scheduleMorningBriefing();
   await startWakeWordListener(handleVoiceInput);
 }
+
+// API ROUTE
+app.post('/api/command', async (req, res) => {
+  const { command } = req.body;
+
+  console.log('[API COMMAND]:', command);
+
+  try {
+    hud.addTranscript('user', command);
+    hud.addTranscript('trillian', 'Processing: ' + command);
+
+    res.json({
+      status: 'ok',
+      reply: 'Received: ' + command
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to process command' });
+  }
+});
+
+// START API SERVER
+app.listen(4001, () => {
+  console.log('[API] Running on http://localhost:4001');
+});
 
 boot().catch(err => { console.error('[FATAL]', err); process.exit(1); });
