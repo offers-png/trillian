@@ -161,29 +161,81 @@ async function boot() {
   await startWakeWordListener(handleVoiceInput);
 }
 
-// API ROUTE
 app.post('/api/command', async (req, res) => {
   const { command } = req.body;
+
+  if (!command || !command.trim()) {
+    return res.status(400).json({ error: 'Missing command' });
+  }
 
   console.log('[API COMMAND]:', command);
 
   try {
+    if (isProcessing) {
+      return res.status(429).json({ error: 'Trillian is busy' });
+    }
+
+    isProcessing = true;
+    hud.updateState({ processing: true, listening: false });
     hud.addTranscript('user', command);
-    hud.addTranscript('trillian', 'Processing: ' + command);
 
-    res.json({
-      status: 'ok',
-      reply: 'Received: ' + command
+    // actions.js shortcut layer
+    try {
+      const { handleAction } = require('./actions');
+      const actionResult = await handleAction(command);
+      if (actionResult) {
+        console.log('[TRILLIAN ACTION] ' + actionResult);
+        hud.addTranscript('trillian', actionResult);
+        isProcessing = false;
+        hud.updateState({ processing: false, listening: true });
+        return res.json({ status: 'ok', reply: actionResult });
+      }
+    } catch (e) {}
+
+    const memories = await recall(command, 5).catch(() => []);
+    const memCtx = memories.length
+      ? '\nContext:\n' + memories.map(m => '- ' + m.content).join('\n')
+      : '';
+
+    const systemPrompt = buildSystemPrompt(memCtx);
+    conversationHistory.push({ role: 'user', content: command });
+    if (conversationHistory.length > MAX_HISTORY) {
+      conversationHistory = conversationHistory.slice(-MAX_HISTORY);
+    }
+
+    console.log('[TRILLIAN] Thinking...');
+    const response = await claude.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1024,
+      system: systemPrompt,
+      tools: getTools(),
+      messages: conversationHistory,
     });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to process command' });
-  }
-});
 
-// START API SERVER
-app.listen(4001, () => {
-  console.log('[API] Running on http://localhost:4001');
+    let finalText = response.stop_reason === 'tool_use'
+      ? await handleToolCalls(response, systemPrompt)
+      : response.content.filter(b => b.type === 'text').map(b => b.text).join(' ');
+
+    if (!finalText) {
+      finalText = 'I did not produce a response.';
+    }
+
+    conversationHistory.push({ role: 'assistant', content: finalText });
+    console.log('[TRILLIAN] ' + finalText);
+    hud.addTranscript('trillian', finalText);
+    storeConversation([
+      { role: 'user', content: command },
+      { role: 'assistant', content: finalText }
+    ]).catch(() => {});
+
+    res.json({ status: 'ok', reply: finalText });
+  } catch (err) {
+    console.error('[API ERROR]', err.message);
+    res.status(500).json({ error: 'Failed to process command' });
+  } finally {
+    isProcessing = false;
+    hud.updateState({ processing: false, listening: true });
+  }
 });
 
 
