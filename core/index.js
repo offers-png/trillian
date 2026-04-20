@@ -27,11 +27,17 @@ let isProcessing = false;
  * Called every time Trillian hears the wake word
  */
 async function handleVoiceInput(audioBuffer) {
+  // Support direct text input (fallback when mic unavailable)
+  let userText;
+  if (audioBuffer._text) {
+    userText = audioBuffer._text;
+    console.log(`[USER] ${userText}`);
+  } else {
   if (isProcessing) return;
   isProcessing = true;
 
   try {
-    // 1. Speech → Text
+    // 1. Speech → Text (skip if already text)
     console.log('[TRILLIAN] Transcribing...');
     const userText = await transcribe(audioBuffer);
     if (!userText || userText.trim().length < 2) {

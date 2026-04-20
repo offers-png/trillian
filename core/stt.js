@@ -1,102 +1,60 @@
-/**
- * TRILLIAN — Speech-to-Text
- * Deepgram Nova-2 (cloud) or Whisper.cpp (local)
- */
+require('dotenv').config();
 const { createClient } = require('@deepgram/sdk');
+const { execFile } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 
-const provider = process.env.STT_PROVIDER || 'deepgram';
-
-/**
- * Transcribe audio buffer to text
- * @param {Buffer} audioBuffer - Raw PCM or MP3 audio
- * @returns {string} Transcribed text
- */
 async function transcribe(audioBuffer) {
-  if (provider === 'deepgram') {
-    return transcribeDeepgram(audioBuffer);
-  } else {
-    return transcribeWhisper(audioBuffer);
-  }
-}
+  if (audioBuffer && audioBuffer._text) return audioBuffer._text;
+  if (!audioBuffer || audioBuffer.length < 500) return '';
 
-/**
- * Deepgram Nova-2 — best accuracy for accents, fastest cloud STT
- */
-async function transcribeDeepgram(audioBuffer) {
   const deepgram = createClient(process.env.DEEPGRAM_API_KEY);
+  let wavBuffer = audioBuffer;
+  if (audioBuffer.toString('ascii', 0, 4) !== 'RIFF') {
+    wavBuffer = pcmToWav(audioBuffer, 16000, 1, 16);
+  }
 
   const { result, error } = await deepgram.listen.prerecorded.transcribeFile(
-    audioBuffer,
-    {
-      model: 'nova-2',
-      smart_format: true,
-      punctuate: true,
-      language: 'en-US',
-    }
+    wavBuffer,
+    { model: 'nova-2', smart_format: true, punctuate: true, language: 'en-US' }
   );
-
-  if (error) throw new Error(`Deepgram error: ${error.message}`);
-
-  const transcript = result?.results?.channels?.[0]?.alternatives?.[0]?.transcript;
-  return transcript || '';
+  if (error) throw new Error(JSON.stringify(error));
+  return result?.results?.channels?.[0]?.alternatives?.[0]?.transcript || '';
 }
 
-/**
- * Whisper.cpp local — private, no API cost, requires whisper.cpp installed
- */
-async function transcribeWhisper(audioBuffer) {
-  const { execFile } = require('child_process');
-  const fs = require('fs');
-  const path = require('path');
-  const os = require('os');
+async function recordAudio(durationMs = 6000) {
+  const tmp = path.join(os.tmpdir(), `trillian_${Date.now()}.wav`);
+  const sec = (durationMs / 1000).toFixed(1);
 
-  // Write buffer to temp wav file
-  const tmpWav = path.join(os.tmpdir(), `trillian_stt_${Date.now()}.wav`);
-  fs.writeFileSync(tmpWav, audioBuffer);
+  const args = process.platform === 'win32'
+    ? ['-t', 'waveaudio', '-d', '-r', '16000', '-c', '1', '-b', '16', '-e', 'signed-integer', tmp, 'trim', '0', sec]
+    : process.platform === 'darwin'
+    ? ['-t', 'coreaudio', '-d', '-r', '16000', '-c', '1', '-b', '16', '-e', 'signed-integer', tmp, 'trim', '0', sec]
+    : ['-t', 'alsa', '-d', '-r', '16000', '-c', '1', '-b', '16', '-e', 'signed-integer', tmp, 'trim', '0', sec];
 
   return new Promise((resolve, reject) => {
-    // Assumes whisper.cpp main binary is in PATH or WHISPER_BIN env var
-    const whisperBin = process.env.WHISPER_BIN || 'whisper-cli';
-    const modelPath = process.env.WHISPER_MODEL || './models/ggml-base.en.bin';
-
-    execFile(whisperBin, ['-m', modelPath, '-f', tmpWav, '-otxt', '-of', tmpWav], (err) => {
-      fs.unlinkSync(tmpWav);
-      if (err) return reject(err);
-
-      const txtFile = tmpWav + '.txt';
-      if (fs.existsSync(txtFile)) {
-        const text = fs.readFileSync(txtFile, 'utf8').trim();
-        fs.unlinkSync(txtFile);
-        resolve(text);
-      } else {
-        resolve('');
+    execFile('sox', args, (err) => {
+      if (err || !fs.existsSync(tmp)) {
+        try { fs.unlinkSync(tmp); } catch {}
+        return reject(new Error(err?.message || 'SoX recording failed'));
       }
+      const buf = fs.readFileSync(tmp);
+      try { fs.unlinkSync(tmp); } catch {}
+      resolve(buf);
     });
   });
 }
 
-/**
- * Record audio from microphone for a specified duration
- * Returns raw audio buffer
- */
-async function recordAudio(durationMs = 8000) {
-  const record = require('node-record-lpcm16');
-
-  return new Promise((resolve) => {
-    const chunks = [];
-    const recording = record.record({
-      sampleRate: 16000,
-      channels: 1,
-      audioType: 'wav',
-    });
-
-    recording.stream().on('data', chunk => chunks.push(chunk));
-
-    setTimeout(() => {
-      recording.stop();
-      resolve(Buffer.concat(chunks));
-    }, durationMs);
-  });
+function pcmToWav(pcm, sampleRate, channels, bitDepth) {
+  const byteRate = sampleRate * channels * (bitDepth / 8);
+  const h = Buffer.alloc(44);
+  h.write('RIFF', 0); h.writeUInt32LE(36 + pcm.length, 4); h.write('WAVE', 8);
+  h.write('fmt ', 12); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20);
+  h.writeUInt16LE(channels, 22); h.writeUInt32LE(sampleRate, 24);
+  h.writeUInt32LE(byteRate, 28); h.writeUInt16LE(channels * bitDepth / 8, 32);
+  h.writeUInt16LE(bitDepth, 34); h.write('data', 36); h.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([h, pcm]);
 }
 
 module.exports = { transcribe, recordAudio };
