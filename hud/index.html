@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TRILLIAN — Mission Control</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #080c10;
+    --panel: #0d1520;
+    --border: #1a3a5c;
+    --cyan: #00d4ff;
+    --blue: #1b4fd8;
+    --green: #00ff88;
+    --red: #ff3355;
+    --text: #c8d8e8;
+    --dim: #4a6a8a;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'Courier New', monospace; height: 100vh; overflow: hidden; }
+
+  /* HEADER */
+  header { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  .logo { font-size: 22px; font-weight: bold; letter-spacing: 8px; color: var(--cyan); text-shadow: 0 0 20px var(--cyan); }
+  .version { color: var(--dim); font-size: 11px; }
+  .status-pill { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 2s infinite; }
+  .dot.processing { background: var(--cyan); animation: spin 1s linear infinite; }
+  .dot.offline { background: var(--red); animation: none; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  /* GRID */
+  .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: auto 1fr; gap: 12px; padding: 12px; height: calc(100vh - 56px); }
+
+  /* PANELS */
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; overflow: hidden; display: flex; flex-direction: column; }
+  .panel-title { font-size: 10px; letter-spacing: 3px; color: var(--cyan); text-transform: uppercase; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+
+  /* ARC REACTOR */
+  .arc-reactor-panel { grid-column: 2; grid-row: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; }
+  .arc { position: relative; width: 120px; height: 120px; }
+  .arc-ring { position: absolute; border-radius: 50%; border: 2px solid transparent; }
+  .arc-ring-1 { inset: 0; border-color: var(--cyan); opacity: 0.3; animation: rotate 8s linear infinite; }
+  .arc-ring-2 { inset: 10px; border-top-color: var(--cyan); border-right-color: var(--cyan); animation: rotate 4s linear infinite reverse; }
+  .arc-ring-3 { inset: 20px; border-bottom-color: var(--blue); animation: rotate 2s linear infinite; }
+  .arc-core { position: absolute; inset: 35px; border-radius: 50%; background: radial-gradient(circle, var(--cyan) 0%, var(--blue) 50%, transparent 100%); box-shadow: 0 0 30px var(--cyan); animation: core-pulse 2s ease-in-out infinite; }
+  .arc-core.active { animation: core-pulse-fast 0.5s ease-in-out infinite; }
+  @keyframes rotate { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+  @keyframes core-pulse { 0%,100%{opacity:0.7;transform:scale(1)} 50%{opacity:1;transform:scale(1.1)} }
+  @keyframes core-pulse-fast { 0%,100%{opacity:1;transform:scale(1.15)} 50%{opacity:0.6;transform:scale(0.9)} }
+  .arc-label { margin-top: 16px; font-size: 11px; letter-spacing: 4px; color: var(--cyan); text-transform: uppercase; }
+
+  /* TRANSCRIPT */
+  .transcript-panel { grid-column: 1 / 4; grid-row: 2; }
+  .transcript { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+  .msg { padding: 10px 14px; border-radius: 6px; font-size: 13px; line-height: 1.5; max-width: 85%; animation: fadeIn 0.3s ease; }
+  .msg.user { background: rgba(27,79,216,0.2); border-left: 3px solid var(--blue); align-self: flex-end; color: #a8c0e0; }
+  .msg.trillian { background: rgba(0,212,255,0.08); border-left: 3px solid var(--cyan); align-self: flex-start; color: var(--text); }
+  .msg-role { font-size: 10px; letter-spacing: 2px; margin-bottom: 4px; opacity: 0.6; }
+  .msg-time { font-size: 10px; opacity: 0.4; float: right; }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+
+  /* STATS PANELS */
+  .stats-panel { grid-column: 1; grid-row: 1; }
+  .workflows-panel { grid-column: 3; grid-row: 1; }
+  .stat { margin-bottom: 12px; }
+  .stat-label { font-size: 10px; color: var(--dim); letter-spacing: 2px; margin-bottom: 4px; }
+  .stat-value { font-size: 20px; color: var(--cyan); font-weight: bold; }
+  .stat-sub { font-size: 11px; color: var(--dim); }
+
+  /* WAVEFORM */
+  .waveform { display: flex; align-items: center; gap: 2px; height: 32px; margin-top: 8px; }
+  .bar { width: 3px; background: var(--cyan); border-radius: 2px; opacity: 0.5; transition: height 0.1s; }
+  .bar.active { opacity: 1; animation: wave 0.8s ease-in-out infinite; }
+  @keyframes wave { 0%,100%{transform:scaleY(0.3)} 50%{transform:scaleY(1)} }
+
+  /* SCROLLBAR */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">TRILLIAN</div>
+  <div class="version">Voice-First AI OS — v0.1.0</div>
+  <div class="status-pill">
+    <div class="dot" id="statusDot"></div>
+    <span id="statusText">ONLINE</span>
+  </div>
+</header>
+
+<div class="grid">
+  <!-- Stats -->
+  <div class="panel stats-panel">
+    <div class="panel-title">System Status</div>
+    <div class="stat">
+      <div class="stat-label">Uptime</div>
+      <div class="stat-value" id="uptime">00:00:00</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Conversations Today</div>
+      <div class="stat-value" id="convCount">0</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Current State</div>
+      <div class="stat-value" style="font-size:14px" id="currentState">Listening</div>
+    </div>
+    <div class="waveform" id="waveform">
+      <div class="bar" style="height:8px"></div><div class="bar" style="height:14px"></div>
+      <div class="bar" style="height:20px"></div><div class="bar" style="height:12px"></div>
+      <div class="bar" style="height:24px"></div><div class="bar" style="height:10px"></div>
+      <div class="bar" style="height:18px"></div><div class="bar" style="height:8px"></div>
+      <div class="bar" style="height:22px"></div><div class="bar" style="height:16px"></div>
+    </div>
+  </div>
+
+  <!-- Arc Reactor -->
+  <div class="panel arc-reactor-panel">
+    <div class="arc">
+      <div class="arc-ring arc-ring-1"></div>
+      <div class="arc-ring arc-ring-2"></div>
+      <div class="arc-ring arc-ring-3"></div>
+      <div class="arc-core" id="arcCore"></div>
+    </div>
+    <div class="arc-label" id="arcLabel">Standby</div>
+  </div>
+
+  <!-- Workflows -->
+  <div class="panel workflows-panel">
+    <div class="panel-title">n8n Pipelines</div>
+    <div class="stat">
+      <div class="stat-label">Total Workflows</div>
+      <div class="stat-value" id="wfTotal">—</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Active</div>
+      <div class="stat-value" style="color:var(--green)" id="wfActive">—</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Inactive</div>
+      <div class="stat-value" style="color:var(--dim)" id="wfInactive">—</div>
+    </div>
+    <div class="stat-sub" id="lastCommand" style="margin-top:8px;color:var(--dim);font-size:11px">Last command: —</div>
+  </div>
+
+  <!-- Transcript -->
+  <div class="panel transcript-panel">
+    <div class="panel-title">Conversation</div>
+    <div class="transcript" id="transcript">
+      <div class="msg trillian">
+        <div class="msg-role">TRILLIAN</div>
+        Trillian online. Waiting for your command, Saleh.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const ws = new WebSocket('ws://' + location.host);
+let convCount = 0;
+let startTime = Date.now();
+
+// Uptime counter
+setInterval(() => {
+  const s = Math.floor((Date.now() - startTime) / 1000);
+  const h = String(Math.floor(s/3600)).padStart(2,'0');
+  const m = String(Math.floor((s%3600)/60)).padStart(2,'0');
+  const sec = String(s%60).padStart(2,'0');
+  document.getElementById('uptime').textContent = h+':'+m+':'+sec;
+}, 1000);
+
+// Load initial state
+fetch('/state').then(r=>r.json()).then(updateUI).catch(()=>{});
+
+ws.onmessage = (e) => {
+  const { event, data } = JSON.parse(e.data);
+  if (event === 'state') updateUI(data);
+  if (event === 'transcript') addMessage(data.role, data.text);
+};
+
+ws.onclose = () => {
+  document.getElementById('statusDot').className = 'dot offline';
+  document.getElementById('statusText').textContent = 'OFFLINE';
+};
+
+function updateUI(s) {
+  if (!s) return;
+  const dot = document.getElementById('statusDot');
+  const arc = document.getElementById('arcCore');
+  const arcLabel = document.getElementById('arcLabel');
+  const stateEl = document.getElementById('currentState');
+
+  if (s.processing) {
+    dot.className = 'dot processing';
+    document.getElementById('statusText').textContent = 'PROCESSING';
+    arc.classList.add('active');
+    arcLabel.textContent = 'Processing';
+    stateEl.textContent = 'Thinking...';
+    activateWaveform(true);
+  } else if (s.listening) {
+    dot.className = 'dot';
+    document.getElementById('statusText').textContent = 'LISTENING';
+    arc.classList.remove('active');
+    arcLabel.textContent = 'Listening';
+    stateEl.textContent = 'Listening';
+    activateWaveform(false);
+  }
+
+  if (s.workflows) {
+    if (s.workflows.total) document.getElementById('wfTotal').textContent = s.workflows.total;
+    if (s.workflows.active) document.getElementById('wfActive').textContent = s.workflows.active;
+    if (s.workflows.inactive !== undefined) document.getElementById('wfInactive').textContent = s.workflows.inactive;
+  }
+  if (s.startedAt) startTime = new Date(s.startedAt).getTime();
+}
+
+function addMessage(role, text) {
+  convCount++;
+  document.getElementById('convCount').textContent = convCount;
+  if (role === 'user') document.getElementById('lastCommand').textContent = 'Last command: ' + text.slice(0,40);
+
+  const transcript = document.getElementById('transcript');
+  const div = document.createElement('div');
+  div.className = 'msg ' + (role === 'user' ? 'user' : 'trillian');
+  div.innerHTML = '<div class="msg-role">' + (role === 'user' ? 'SALEH' : 'TRILLIAN') + '<span class="msg-time">' + new Date().toLocaleTimeString() + '</span></div>' + text;
+  transcript.insertBefore(div, transcript.firstChild);
+}
+
+function activateWaveform(active) {
+  document.querySelectorAll('.bar').forEach((b,i) => {
+    b.className = active ? 'bar active' : 'bar';
+    if (active) b.style.animationDelay = (i * 0.1) + 's';
+  });
+}
+
+// Auto-reconnect
+ws.onerror = () => setTimeout(() => location.reload(), 3000);
+</script>
+</body>
+</html>
