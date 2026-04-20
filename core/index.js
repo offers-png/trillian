@@ -184,4 +184,28 @@ app.listen(4001, () => {
   console.log('[API] Running on http://localhost:4001');
 });
 
+// ===== API LAYER =====
+const express = require('express');
+const app = express();
+
+app.use(express.json());
+
+app.post('/api/command', (req, res) => {
+  const { command } = req.body;
+
+  console.log('[API COMMAND]:', command);
+
+  hud.addTranscript('user', command);
+  hud.addTranscript('trillian', 'Processing: ' + command);
+
+  res.json({
+    status: 'ok',
+    reply: 'Received: ' + command
+  });
+});
+
+app.listen(4001, () => {
+  console.log('[API] Running on http://localhost:4001');
+});
+
 boot().catch(err => { console.error('[FATAL]', err); process.exit(1); });
