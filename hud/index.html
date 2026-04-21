@@ -321,9 +321,13 @@ async function attachStreamToVideo(video, stream) {
     };
   });
 
-  await video.play();
-}
+ await video.play();
 
+if (document.pictureInPictureElement) {
+  await document.exitPictureInPicture().catch(() => {});
+}
+video.disablePictureInPicture = true;
+ 
 function waitForVideoFrame() {
   if (videoEl.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA && videoEl.videoWidth && videoEl.videoHeight && videoEl.currentTime > 0) {
     return Promise.resolve();
