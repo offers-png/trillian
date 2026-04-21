@@ -196,7 +196,16 @@ async function initCamera() {
   videoEl = document.createElement('video');
   videoEl.autoplay = true;
   videoEl.playsInline = true;
-  videoEl.style.display = 'none';
+  videoEl.style.display = 'block';
+  videoEl.style.position = 'fixed';
+  videoEl.style.right = '20px';
+  videoEl.style.bottom = '20px';
+  videoEl.style.width = '240px';
+  videoEl.style.height = '180px';
+  videoEl.style.zIndex = '9999';
+  videoEl.style.background = '#000';
+  videoEl.muted = true;
+  await videoEl.play();
   document.body.appendChild(videoEl);
 
   const devices = await navigator.mediaDevices.enumerateDevices();
