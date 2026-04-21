@@ -28,9 +28,10 @@
   .dot.processing { background: var(--cyan); animation: spin 1s linear infinite; }
   .dot.offline { background: var(--red); animation: none; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
 
   /* GRID */
-  .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: auto 1fr; gap: 12px; padding: 12px; height: calc(100vh - 56px); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: auto 220px 1fr; gap: 12px; padding: 12px; height: calc(100vh - 56px); }
 
   /* PANELS */
   .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; overflow: hidden; display: flex; flex-direction: column; }
@@ -51,7 +52,8 @@
   .arc-label { margin-top: 16px; font-size: 11px; letter-spacing: 4px; color: var(--cyan); text-transform: uppercase; }
 
   /* TRANSCRIPT */
-  .transcript-panel { grid-column: 1 / 4; grid-row: 2; }
+  .camera-panel { grid-column: 1 / 4; grid-row: 2; }
+  .transcript-panel { grid-column: 1 / 4; grid-row: 3; }
   .transcript { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
   .msg { padding: 10px 14px; border-radius: 6px; font-size: 13px; line-height: 1.5; max-width: 85%; animation: fadeIn 0.3s ease; }
   .msg.user { background: rgba(27,79,216,0.2); border-left: 3px solid var(--blue); align-self: flex-end; color: #a8c0e0; }
@@ -69,8 +71,8 @@
   .stat-sub { font-size: 11px; color: var(--dim); }
   .camera-shell {
     position: relative;
-    margin-top: 12px;
-    height: 168px;
+    flex: 1;
+    min-height: 0;
     border: 1px solid var(--border);
     border-radius: 8px;
     overflow: hidden;
@@ -83,19 +85,6 @@
     display: block;
     object-fit: cover;
     background: #000;
-  }
-  .camera-preview {
-    width: 100%;
-    height: 100%;
-    display: block;
-    background: #000;
-  }
-  .camera-source {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    opacity: 0;
-    pointer-events: none;
   }
   .camera-status {
     position: absolute;
@@ -185,9 +174,12 @@
       <div class="stat-value" style="color:var(--dim)" id="wfInactive">—</div>
     </div>
     <div class="stat-sub" id="lastCommand" style="margin-top:8px;color:var(--dim);font-size:11px">Last command: —</div>
+  </div>
+
+  <div class="panel camera-panel">
+    <div class="panel-title">Optic Feed</div>
     <div class="camera-shell">
-      <canvas id="cameraPreview" class="camera-preview"></canvas>
-      <video id="cameraFeed" class="camera-feed camera-source" autoplay playsinline muted></video>
+      <video id="cameraFeed" class="camera-feed" autoplay playsinline muted></video>
       <div class="camera-status" id="cameraStatus">Camera offline</div>
     </div>
   </div>
@@ -210,10 +202,8 @@ let convCount = 0;
 let startTime = Date.now();
 let videoStream = null;
 let cameraInitPromise = null;
-let previewLoopHandle = null;
+let selectedCameraLabel = '';
 const videoEl = document.getElementById('cameraFeed');
-const previewCanvas = document.getElementById('cameraPreview');
-const previewCtx = previewCanvas.getContext('2d', { willReadFrequently: true });
 const cameraStatusEl = document.getElementById('cameraStatus');
 
 function setCameraStatus(text) {
@@ -224,19 +214,64 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function syncPreviewSize() {
-  const shell = previewCanvas.parentElement;
-  const width = Math.max(videoEl.videoWidth || 0, shell.clientWidth || 0, 320);
-  const height = Math.max(videoEl.videoHeight || 0, shell.clientHeight || 0, 180);
-
-  if (previewCanvas.width !== width || previewCanvas.height !== height) {
-    previewCanvas.width = width;
-    previewCanvas.height = height;
-  }
-}
-
 function hasLiveVideoTrack(stream) {
   return Boolean(stream?.getVideoTracks?.().some((track) => track.readyState === 'live' && track.enabled !== false));
+}
+
+function logVideoDevices(devices) {
+  console.log('[CAMERA] Available video devices:');
+  devices.forEach((device, index) => {
+    console.log('[CAMERA] ' + (index + 1) + '.', {
+      label: device.label || '(empty label)',
+      deviceId: device.deviceId
+    });
+  });
+}
+
+function stopStream(stream) {
+  stream?.getTracks?.().forEach((track) => track.stop());
+}
+
+async function getSelectableVideoDevices() {
+  let devices = await navigator.mediaDevices.enumerateDevices();
+  let videoInputs = devices.filter((device) => device.kind === 'videoinput');
+  logVideoDevices(videoInputs);
+
+  const labeledDevices = videoInputs.filter((device) => device.label && device.label.trim());
+  if (labeledDevices.length > 0) {
+    return labeledDevices;
+  }
+
+  console.log('[CAMERA] No labeled video devices found. Requesting permission before re-enumerating.');
+  const permissionStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+  stopStream(permissionStream);
+
+  devices = await navigator.mediaDevices.enumerateDevices();
+  videoInputs = devices.filter((device) => device.kind === 'videoinput');
+  logVideoDevices(videoInputs);
+  return videoInputs.filter((device) => device.label && device.label.trim());
+}
+
+async function waitForRenderedFrames() {
+  const startTime = performance.now();
+  let lastTime = videoEl.currentTime;
+
+  while (performance.now() - startTime < 5000) {
+    if (
+      videoEl.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA &&
+      videoEl.videoWidth &&
+      videoEl.videoHeight &&
+      videoEl.currentTime > 0 &&
+      videoEl.currentTime !== lastTime
+    ) {
+      return;
+    }
+
+    lastTime = videoEl.currentTime;
+    await wait(120);
+  }
+
+  throw new Error('Timed out waiting for rendered camera frames');
 }
 
 function waitForVideoFrame() {
@@ -276,41 +311,6 @@ function waitForVideoFrame() {
   });
 }
 
-function drawPreviewFrame(source, width, height) {
-  syncPreviewSize();
-  previewCtx.drawImage(source, 0, 0, width, height, 0, 0, previewCanvas.width, previewCanvas.height);
-}
-
-function startPreviewLoop() {
-  if (previewLoopHandle) {
-    if (typeof videoEl.cancelVideoFrameCallback === 'function') {
-      videoEl.cancelVideoFrameCallback(previewLoopHandle);
-    } else {
-      cancelAnimationFrame(previewLoopHandle);
-    }
-    previewLoopHandle = null;
-  }
-
-  const render = () => {
-    if (!videoStream || !hasLiveVideoTrack(videoStream)) {
-      previewLoopHandle = null;
-      return;
-    }
-
-    if (videoEl.videoWidth && videoEl.videoHeight) {
-      drawPreviewFrame(videoEl, videoEl.videoWidth, videoEl.videoHeight);
-    }
-
-    if (typeof videoEl.requestVideoFrameCallback === 'function') {
-      previewLoopHandle = videoEl.requestVideoFrameCallback(() => render());
-    } else {
-      previewLoopHandle = requestAnimationFrame(render);
-    }
-  };
-
-  render();
-}
-
 function isFrameMostlyBlack(canvas) {
   const sampleSize = 24;
   const sampleCanvas = document.createElement('canvas');
@@ -347,7 +347,7 @@ async function captureTrackFrame(track, width, height) {
 async function initCamera() {
   if (videoStream && videoEl.srcObject === videoStream && hasLiveVideoTrack(videoStream)) {
     await waitForVideoFrame();
-    startPreviewLoop();
+    await waitForRenderedFrames();
     return videoStream;
   }
 
@@ -362,23 +362,37 @@ async function initCamera() {
 
     setCameraStatus('Connecting camera');
 
+    const labeledDevices = await getSelectableVideoDevices();
+    const selectedDevice = labeledDevices[0];
+    if (!selectedDevice?.deviceId) {
+      throw new Error('No suitable labeled camera found');
+    }
+
+    selectedCameraLabel = selectedDevice.label;
+    const selectedDeviceId = selectedDevice.deviceId;
+
+    if (videoStream) {
+      stopStream(videoStream);
+      videoStream = null;
+    }
+
+    const video = document.querySelector('#cameraFeed');
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-        facingMode: 'user'
-      },
+      video: { deviceId: { exact: selectedDeviceId } },
       audio: false
     });
 
     videoStream = stream;
-    videoEl.muted = true;
-    videoEl.autoplay = true;
-    videoEl.playsInline = true;
-    videoEl.setAttribute('muted', '');
-    videoEl.setAttribute('autoplay', '');
-    videoEl.setAttribute('playsinline', '');
-    videoEl.srcObject = stream;
+    video.srcObject = stream;
+    video.muted = true;
+    video.playsInline = true;
+    video.autoplay = true;
+    video.setAttribute('muted', '');
+    video.setAttribute('autoplay', '');
+    video.setAttribute('playsinline', '');
+    video.style.display = 'block';
+    video.style.visibility = 'visible';
+    video.style.opacity = '1';
     await new Promise((resolve) => {
       if (videoEl.readyState >= HTMLMediaElement.HAVE_METADATA) {
         resolve();
@@ -389,11 +403,10 @@ async function initCamera() {
         resolve();
       };
     });
-    await videoEl.play();
+    await video.play();
     await waitForVideoFrame();
-    await wait(150);
-    startPreviewLoop();
-    setCameraStatus('Camera live');
+    await waitForRenderedFrames();
+    setCameraStatus('Camera live: ' + selectedCameraLabel);
     return stream;
   })().catch((error) => {
     videoStream = null;
@@ -461,11 +474,14 @@ window.sendCommand = sendCommand;
 async function captureFrame() {
   const stream = await initCamera();
   await waitForVideoFrame();
+  await waitForRenderedFrames();
 
   const track = stream.getVideoTracks()[0];
   if (!track || track.readyState !== 'live') {
     throw new Error('Camera track is not live');
   }
+
+  console.log('[CAMERA] Capturing frame from:', selectedCameraLabel || track.label || '(unknown camera)');
 
   const width = Math.min(videoEl.videoWidth || 1280, 1280);
   const height = Math.max(Math.round(width * ((videoEl.videoHeight || 720) / (videoEl.videoWidth || 1280))), 1);
@@ -488,7 +504,6 @@ async function captureFrame() {
     }
 
     if (!isFrameMostlyBlack(canvas)) {
-      drawPreviewFrame(canvas, canvas.width, canvas.height);
       return canvas.toDataURL('image/jpeg', 0.92);
     }
 
