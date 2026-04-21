@@ -243,4 +243,48 @@ app.listen(4001, () => {
   console.log('[API] Running on http://localhost:4001');
 });
 
+app.post('/api/vision', async (req, res) => {
+  const { image } = req.body;
+
+  if (!image) {
+    return res.status(400).json({ error: 'Missing image' });
+  }
+
+  try {
+    const response = await claude.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 500,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: 'Describe exactly what you see in this image for Trillian.'
+            },
+            {
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: 'image/png',
+                data: image.replace(/^data:image\/png;base64,/, '')
+              }
+            }
+          ]
+        }
+      ]
+    });
+
+    const text = response.content
+      .filter(block => block.type === 'text')
+      .map(block => block.text)
+      .join(' ');
+
+    res.json({ reply: text });
+  } catch (err) {
+    console.error('[VISION ERROR]', err);
+    res.status(500).json({ error: 'Vision failed' });
+  }
+});
+
 boot().catch(err => { console.error('[FATAL]', err); process.exit(1); });
