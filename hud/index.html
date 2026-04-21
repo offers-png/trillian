@@ -232,15 +232,6 @@ async function initCamera() {
   videoEl.srcObject = videoStream;
   await videoEl.play();
 }
-  
-  videoStream = await navigator.mediaDevices.getUserMedia({
-    video: cam
-      ? { deviceId: { ideal: cam.deviceId } }
-      : true
-  });
-
-  videoEl.srcObject = videoStream;
-}
 
 async function captureFrame() {
   if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight) {
