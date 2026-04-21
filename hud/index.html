@@ -195,14 +195,18 @@ let videoEl;
 async function initCamera() {
   videoEl = document.createElement('video');
   videoEl.autoplay = true;
+  videoEl.playsInline = true;
   videoEl.style.display = 'none';
   document.body.appendChild(videoEl);
 
   videoStream = await navigator.mediaDevices.getUserMedia({
-  video: {
-    facingMode: "user" // or "environment" if external cam
-  }
-});
+    video: {
+      deviceId: {
+        exact: '93ccfbb496c66eedb6922da77f890f4a1d7ff826b0877caffe3f27a1'
+      }
+    }
+  });
+
   videoEl.srcObject = videoStream;
 }
 
