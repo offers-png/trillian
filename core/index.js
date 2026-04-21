@@ -169,6 +169,10 @@ app.post('/api/command', async (req, res) => {
     return res.status(400).json({ error: 'Missing command' });
   }
 
+  if (command.toLowerCase().includes('what do you see')) {
+    return res.json({ action: 'vision' });
+  }
+
   console.log('[API COMMAND]:', command);
 
   try {
@@ -287,7 +291,5 @@ app.post('/api/vision', async (req, res) => {
   }
 });
 
-if (command.toLowerCase().includes('what do you see')) {
-  return { action: 'vision' };
-}
+
 boot().catch(err => { console.error('[FATAL]', err); process.exit(1); });
