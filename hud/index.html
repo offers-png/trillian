@@ -232,6 +232,15 @@ function stopStream(stream) {
   stream?.getTracks?.().forEach((track) => track.stop());
 }
 
+function resetVideoElement(video) {
+  try {
+    video.pause();
+  } catch (error) {}
+  video.srcObject = null;
+  video.removeAttribute('src');
+  video.load();
+}
+
 async function getSelectableVideoDevices() {
   let devices = await navigator.mediaDevices.enumerateDevices();
   let videoInputs = devices.filter((device) => device.kind === 'videoinput');
@@ -272,6 +281,36 @@ async function waitForRenderedFrames() {
   }
 
   throw new Error('Timed out waiting for rendered camera frames');
+}
+
+async function attachStreamToVideo(video, stream) {
+  resetVideoElement(video);
+
+  video.srcObject = stream;
+  video.muted = true;
+  video.defaultMuted = true;
+  video.playsInline = true;
+  video.autoplay = true;
+  video.controls = false;
+  video.setAttribute('muted', '');
+  video.setAttribute('autoplay', '');
+  video.setAttribute('playsinline', '');
+  video.style.display = 'block';
+  video.style.visibility = 'visible';
+  video.style.opacity = '1';
+
+  await new Promise((resolve) => {
+    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      resolve();
+      return;
+    }
+    video.onloadedmetadata = () => {
+      video.onloadedmetadata = null;
+      resolve();
+    };
+  });
+
+  await video.play();
 }
 
 function waitForVideoFrame() {
@@ -377,39 +416,49 @@ async function initCamera() {
     }
 
     const video = document.querySelector('#cameraFeed');
-    const stream = await navigator.mediaDevices.getUserMedia({
+    let stream = await navigator.mediaDevices.getUserMedia({
       video: { deviceId: { exact: selectedDeviceId } },
       audio: false
     });
 
-    videoStream = stream;
-    video.srcObject = stream;
-    video.muted = true;
-    video.playsInline = true;
-    video.autoplay = true;
-    video.setAttribute('muted', '');
-    video.setAttribute('autoplay', '');
-    video.setAttribute('playsinline', '');
-    video.style.display = 'block';
-    video.style.visibility = 'visible';
-    video.style.opacity = '1';
-    await new Promise((resolve) => {
-      if (videoEl.readyState >= HTMLMediaElement.HAVE_METADATA) {
-        resolve();
-        return;
-      }
-      videoEl.onloadedmetadata = () => {
-        videoEl.onloadedmetadata = null;
-        resolve();
-      };
+    let track = stream.getVideoTracks()[0];
+    console.log('[CAMERA] Opening stream:', {
+      label: selectedCameraLabel,
+      deviceId: selectedDeviceId,
+      readyState: track?.readyState,
+      muted: track?.muted,
+      enabled: track?.enabled,
+      settings: track?.getSettings?.()
     });
-    await video.play();
-    await waitForVideoFrame();
-    await waitForRenderedFrames();
+
+    track?.addEventListener('mute', () => console.warn('[CAMERA] Track muted:', track.label));
+    track?.addEventListener('unmute', () => console.log('[CAMERA] Track unmuted:', track.label));
+    track?.addEventListener('ended', () => console.warn('[CAMERA] Track ended:', track.label));
+
+    videoStream = stream;
+    await attachStreamToVideo(video, stream);
+
+    try {
+      await waitForVideoFrame();
+      await waitForRenderedFrames();
+    } catch (error) {
+      console.warn('[CAMERA] Initial render failed, retrying same device once:', error.message);
+      stopStream(stream);
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { deviceId: { exact: selectedDeviceId } },
+        audio: false
+      });
+      videoStream = stream;
+      await attachStreamToVideo(video, stream);
+      await waitForVideoFrame();
+      await waitForRenderedFrames();
+    }
+
     setCameraStatus('Camera live: ' + selectedCameraLabel);
     return stream;
   })().catch((error) => {
     videoStream = null;
+    resetVideoElement(videoEl);
     setCameraStatus('Camera error');
     throw error;
   }).finally(() => {
