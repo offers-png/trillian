@@ -161,6 +161,8 @@ const ws = new WebSocket('ws://' + location.host);
 let convCount = 0;
 let startTime = Date.now();
 async function sendCommand(command) {
+  addMessage('user', command);
+
   try {
     const res = await fetch('http://localhost:4001/api/command', {
       method: 'POST',
@@ -180,11 +182,21 @@ async function sendCommand(command) {
       });
 
       const visionData = await visionRes.json();
-      addMessage('trillian', visionData.reply);
+
+      if (visionData?.reply) addMessage('trillian', visionData.reply);
+      else addMessage('trillian', 'Vision failed.');
+      return;
     }
 
+    if (data?.reply) {
+      addMessage('trillian', data.reply);
+      return;
+    }
+
+    addMessage('trillian', 'No reply returned.');
   } catch (e) {
     addMessage('trillian', 'Connection error.');
+    console.error(e);
   }
 }
  window.sendCommand = sendCommand;
@@ -196,6 +208,7 @@ async function initCamera() {
   videoEl = document.createElement('video');
   videoEl.autoplay = true;
   videoEl.playsInline = true;
+  videoEl.muted = true;
   videoEl.style.display = 'block';
   videoEl.style.position = 'fixed';
   videoEl.style.right = '20px';
@@ -204,8 +217,21 @@ async function initCamera() {
   videoEl.style.height = '180px';
   videoEl.style.zIndex = '9999';
   videoEl.style.background = '#000';
-  videoEl.muted = true;
+  document.body.appendChild(videoEl);
+
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const cam = devices.find(d =>
+    d.kind === 'videoinput' &&
+    d.label.includes('USB Video Device')
+  );
+
+  videoStream = await navigator.mediaDevices.getUserMedia({
+    video: cam ? { deviceId: { ideal: cam.deviceId } } : true
+  });
+
+  videoEl.srcObject = videoStream;
   await videoEl.play();
+}
   document.body.appendChild(videoEl);
 
   const devices = await navigator.mediaDevices.enumerateDevices();
@@ -224,6 +250,10 @@ async function initCamera() {
 }
 
 async function captureFrame() {
+  if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight) {
+    throw new Error('Camera frame not ready');
+  }
+
   const canvas = document.createElement('canvas');
   canvas.width = videoEl.videoWidth;
   canvas.height = videoEl.videoHeight;
