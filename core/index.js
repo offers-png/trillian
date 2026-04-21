@@ -4,6 +4,10 @@ const express = require('express');
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.post('/api/command', (req, res) => {
+  console.log('[API HIT]', req.body);
+  res.json({ status: 'ok', reply: 'API working' });
+});
 const { startWakeWordListener } = require('./wake-word');
 const { transcribe, recordAudio } = require('./stt');
 const { speak, speakStream } = require('./tts');
