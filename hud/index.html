@@ -171,7 +171,7 @@ async function sendCommand(command) {
     });
 
     const data = await res.json();
-    addMessage('trillian', data.reply);
+   if (data?.reply) addMessage('trillian', data.reply);
   } catch (e) {
     addMessage('trillian', 'Connection error.');
   }
