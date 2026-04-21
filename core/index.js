@@ -238,5 +238,8 @@ app.post('/api/command', async (req, res) => {
   }
 });
 
+app.listen(4001, () => {
+  console.log('[API] Running on http://localhost:4001');
+});
 
 boot().catch(err => { console.error('[FATAL]', err); process.exit(1); });
