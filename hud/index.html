@@ -197,7 +197,10 @@
 </div>
 
 <script>
-const ws = new WebSocket('ws://' + location.host);
+const HUD_ORIGIN = location.protocol === 'file:' ? 'http://localhost:4000' : location.origin;
+const CORE_API_ORIGIN = 'http://localhost:4001';
+const WS_ORIGIN = location.protocol === 'file:' ? 'ws://localhost:4000' : 'ws://' + location.host;
+const ws = new WebSocket(WS_ORIGIN);
 let convCount = 0;
 let startTime = Date.now();
 let videoStream = null;
@@ -237,8 +240,6 @@ function resetVideoElement(video) {
     video.pause();
   } catch (error) {}
   video.srcObject = null;
-  video.removeAttribute('src');
-  video.load();
 }
 
 async function getSelectableVideoDevices() {
@@ -259,6 +260,16 @@ async function getSelectableVideoDevices() {
   videoInputs = devices.filter((device) => device.kind === 'videoinput');
   logVideoDevices(videoInputs);
   return videoInputs.filter((device) => device.label && device.label.trim());
+}
+
+function selectCameraDevice(devices) {
+  const usbDevice = devices.find((device) => /USB Video Device/i.test(device.label));
+  if (usbDevice) {
+    return usbDevice;
+  }
+
+  const nonPhoneDevice = devices.find((device) => !/(Galaxy|iPhone|Android|Phone Link)/i.test(device.label));
+  return nonPhoneDevice || devices[0] || null;
 }
 
 async function waitForRenderedFrames() {
@@ -402,7 +413,7 @@ async function initCamera() {
     setCameraStatus('Connecting camera');
 
     const labeledDevices = await getSelectableVideoDevices();
-    const selectedDevice = labeledDevices[0];
+    const selectedDevice = selectCameraDevice(labeledDevices);
     if (!selectedDevice?.deviceId) {
       throw new Error('No suitable labeled camera found');
     }
@@ -472,7 +483,7 @@ async function sendCommand(command) {
   addMessage('user', command);
 
   try {
-    const res = await fetch('http://localhost:4001/api/command', {
+    const res = await fetch(CORE_API_ORIGIN + '/api/command', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ command })
@@ -489,7 +500,7 @@ async function sendCommand(command) {
       await initCamera();
       const image = await captureFrame();
 
-      const visionRes = await fetch('http://localhost:4001/api/vision', {
+      const visionRes = await fetch(CORE_API_ORIGIN + '/api/vision', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ image, command })
@@ -575,7 +586,7 @@ setInterval(() => {
 }, 1000);
 
 // Load initial state
-fetch('/state').then(r=>r.json()).then(updateUI).catch(()=>{});
+fetch(HUD_ORIGIN + '/state').then(r=>r.json()).then(updateUI).catch(()=>{});
 
 ws.onmessage = (e) => {
   const { event, data } = JSON.parse(e.data);
