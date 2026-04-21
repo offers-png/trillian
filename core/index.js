@@ -287,4 +287,7 @@ app.post('/api/vision', async (req, res) => {
   }
 });
 
+if (command.toLowerCase().includes('what do you see')) {
+  return { action: 'vision' };
+}
 boot().catch(err => { console.error('[FATAL]', err); process.exit(1); });
