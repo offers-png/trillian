@@ -162,11 +162,27 @@ let convCount = 0;
 let startTime = Date.now();
 async function sendCommand(command) {
   try {
-    await fetch('http://localhost:4001/api/command', {
+    const res = await fetch('http://localhost:4001/api/command', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ command })
     });
+
+    const data = await res.json();
+
+    if (data?.action === 'vision') {
+      const image = await captureFrame();
+
+      const visionRes = await fetch('http://localhost:4001/api/vision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image })
+      });
+
+      const visionData = await visionRes.json();
+      addMessage('trillian', visionData.reply);
+    }
+
   } catch (e) {
     addMessage('trillian', 'Connection error.');
   }
