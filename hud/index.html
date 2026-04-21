@@ -67,6 +67,49 @@
   .stat-label { font-size: 10px; color: var(--dim); letter-spacing: 2px; margin-bottom: 4px; }
   .stat-value { font-size: 20px; color: var(--cyan); font-weight: bold; }
   .stat-sub { font-size: 11px; color: var(--dim); }
+  .camera-shell {
+    position: relative;
+    margin-top: 12px;
+    height: 168px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    background: #02070d;
+    box-shadow: inset 0 0 30px rgba(0, 212, 255, 0.08);
+  }
+  .camera-feed {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+    background: #000;
+  }
+  .camera-preview {
+    width: 100%;
+    height: 100%;
+    display: block;
+    background: #000;
+  }
+  .camera-source {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .camera-status {
+    position: absolute;
+    left: 10px;
+    bottom: 10px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(8, 12, 16, 0.82);
+    border: 1px solid var(--border);
+    color: var(--cyan);
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
 
   /* WAVEFORM */
   .waveform { display: flex; align-items: center; gap: 2px; height: 32px; margin-top: 8px; }
@@ -142,6 +185,11 @@
       <div class="stat-value" style="color:var(--dim)" id="wfInactive">—</div>
     </div>
     <div class="stat-sub" id="lastCommand" style="margin-top:8px;color:var(--dim);font-size:11px">Last command: —</div>
+    <div class="camera-shell">
+      <canvas id="cameraPreview" class="camera-preview"></canvas>
+      <video id="cameraFeed" class="camera-feed camera-source" autoplay playsinline muted></video>
+      <div class="camera-status" id="cameraStatus">Camera offline</div>
+    </div>
   </div>
 
   <!-- Transcript -->
@@ -160,6 +208,204 @@
 const ws = new WebSocket('ws://' + location.host);
 let convCount = 0;
 let startTime = Date.now();
+let videoStream = null;
+let cameraInitPromise = null;
+let previewLoopHandle = null;
+const videoEl = document.getElementById('cameraFeed');
+const previewCanvas = document.getElementById('cameraPreview');
+const previewCtx = previewCanvas.getContext('2d', { willReadFrequently: true });
+const cameraStatusEl = document.getElementById('cameraStatus');
+
+function setCameraStatus(text) {
+  cameraStatusEl.textContent = text;
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function syncPreviewSize() {
+  const shell = previewCanvas.parentElement;
+  const width = Math.max(videoEl.videoWidth || 0, shell.clientWidth || 0, 320);
+  const height = Math.max(videoEl.videoHeight || 0, shell.clientHeight || 0, 180);
+
+  if (previewCanvas.width !== width || previewCanvas.height !== height) {
+    previewCanvas.width = width;
+    previewCanvas.height = height;
+  }
+}
+
+function hasLiveVideoTrack(stream) {
+  return Boolean(stream?.getVideoTracks?.().some((track) => track.readyState === 'live' && track.enabled !== false));
+}
+
+function waitForVideoFrame() {
+  if (videoEl.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA && videoEl.videoWidth && videoEl.videoHeight && videoEl.currentTime > 0) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error('Timed out waiting for camera frame'));
+    }, 5000);
+
+    const onReady = () => {
+      if (videoEl.videoWidth && videoEl.videoHeight) {
+        cleanup();
+        resolve();
+      }
+    };
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      videoEl.removeEventListener('loadeddata', onReady);
+      videoEl.removeEventListener('canplay', onReady);
+      videoEl.removeEventListener('loadedmetadata', onReady);
+    };
+
+    videoEl.addEventListener('loadeddata', onReady);
+    videoEl.addEventListener('canplay', onReady);
+    videoEl.addEventListener('loadedmetadata', onReady);
+
+    if (typeof videoEl.requestVideoFrameCallback === 'function') {
+      videoEl.requestVideoFrameCallback(() => {
+        onReady();
+      });
+    }
+  });
+}
+
+function drawPreviewFrame(source, width, height) {
+  syncPreviewSize();
+  previewCtx.drawImage(source, 0, 0, width, height, 0, 0, previewCanvas.width, previewCanvas.height);
+}
+
+function startPreviewLoop() {
+  if (previewLoopHandle) {
+    if (typeof videoEl.cancelVideoFrameCallback === 'function') {
+      videoEl.cancelVideoFrameCallback(previewLoopHandle);
+    } else {
+      cancelAnimationFrame(previewLoopHandle);
+    }
+    previewLoopHandle = null;
+  }
+
+  const render = () => {
+    if (!videoStream || !hasLiveVideoTrack(videoStream)) {
+      previewLoopHandle = null;
+      return;
+    }
+
+    if (videoEl.videoWidth && videoEl.videoHeight) {
+      drawPreviewFrame(videoEl, videoEl.videoWidth, videoEl.videoHeight);
+    }
+
+    if (typeof videoEl.requestVideoFrameCallback === 'function') {
+      previewLoopHandle = videoEl.requestVideoFrameCallback(() => render());
+    } else {
+      previewLoopHandle = requestAnimationFrame(render);
+    }
+  };
+
+  render();
+}
+
+function isFrameMostlyBlack(canvas) {
+  const sampleSize = 24;
+  const sampleCanvas = document.createElement('canvas');
+  sampleCanvas.width = sampleSize;
+  sampleCanvas.height = sampleSize;
+  const sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
+  sampleCtx.drawImage(canvas, 0, 0, sampleSize, sampleSize);
+
+  const { data } = sampleCtx.getImageData(0, 0, sampleSize, sampleSize);
+  let totalLuma = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    totalLuma += 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+  }
+
+  const averageLuma = totalLuma / (data.length / 4);
+  return averageLuma < 12;
+}
+
+async function captureTrackFrame(track, width, height) {
+  if (typeof ImageCapture !== 'function') {
+    return null;
+  }
+
+  const bitmap = await new ImageCapture(track).grabFrame();
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close?.();
+  return canvas;
+}
+
+async function initCamera() {
+  if (videoStream && videoEl.srcObject === videoStream && hasLiveVideoTrack(videoStream)) {
+    await waitForVideoFrame();
+    startPreviewLoop();
+    return videoStream;
+  }
+
+  if (cameraInitPromise) {
+    return cameraInitPromise;
+  }
+
+  cameraInitPromise = (async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error('Camera is not supported in this browser');
+    }
+
+    setCameraStatus('Connecting camera');
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        facingMode: 'user'
+      },
+      audio: false
+    });
+
+    videoStream = stream;
+    videoEl.muted = true;
+    videoEl.autoplay = true;
+    videoEl.playsInline = true;
+    videoEl.setAttribute('muted', '');
+    videoEl.setAttribute('autoplay', '');
+    videoEl.setAttribute('playsinline', '');
+    videoEl.srcObject = stream;
+    await new Promise((resolve) => {
+      if (videoEl.readyState >= HTMLMediaElement.HAVE_METADATA) {
+        resolve();
+        return;
+      }
+      videoEl.onloadedmetadata = () => {
+        videoEl.onloadedmetadata = null;
+        resolve();
+      };
+    });
+    await videoEl.play();
+    await waitForVideoFrame();
+    await wait(150);
+    startPreviewLoop();
+    setCameraStatus('Camera live');
+    return stream;
+  })().catch((error) => {
+    videoStream = null;
+    setCameraStatus('Camera error');
+    throw error;
+  }).finally(() => {
+    cameraInitPromise = null;
+  });
+
+  return cameraInitPromise;
+}
+
 async function sendCommand(command) {
   addMessage('user', command);
 
@@ -170,16 +416,27 @@ async function sendCommand(command) {
       body: JSON.stringify({ command })
     });
 
+    if (!res.ok) {
+      const message = await res.text();
+      throw new Error(message || 'Command request failed');
+    }
+
     const data = await res.json();
 
     if (data?.action === 'vision') {
+      await initCamera();
       const image = await captureFrame();
 
       const visionRes = await fetch('http://localhost:4001/api/vision', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image })
+        body: JSON.stringify({ image, command })
       });
+
+      if (!visionRes.ok) {
+        const message = await visionRes.text();
+        throw new Error(message || 'Vision request failed');
+      }
 
       const visionData = await visionRes.json();
 
@@ -199,53 +456,51 @@ async function sendCommand(command) {
     console.error(e);
   }
 }
- window.sendCommand = sendCommand;
-
- let videoStream;
-let videoEl;
- 
-async function initCamera() {
-  videoEl = document.createElement('video');
-  videoEl.autoplay = true;
-  videoEl.playsInline = true;
-  videoEl.muted = true;
-  videoEl.style.display = 'block';
-  videoEl.style.position = 'fixed';
-  videoEl.style.right = '20px';
-  videoEl.style.bottom = '20px';
-  videoEl.style.width = '240px';
-  videoEl.style.height = '180px';
-  videoEl.style.zIndex = '9999';
-  videoEl.style.background = '#000';
-  document.body.appendChild(videoEl);
-
-  const devices = await navigator.mediaDevices.enumerateDevices();
-  const cams = devices.filter(d => d.kind === 'videoinput');
-  const cam = cams[0]; // just use first real camera
-
-  videoStream = await navigator.mediaDevices.getUserMedia({
-    video: cam ? { deviceId: { ideal: cam.deviceId } } : true
-  });
-
-  videoEl.srcObject = videoStream;
-  await videoEl.play();
-}
+window.sendCommand = sendCommand;
 
 async function captureFrame() {
-  if (!videoEl || !videoEl.videoWidth || !videoEl.videoHeight) {
-    throw new Error('Camera frame not ready');
+  const stream = await initCamera();
+  await waitForVideoFrame();
+
+  const track = stream.getVideoTracks()[0];
+  if (!track || track.readyState !== 'live') {
+    throw new Error('Camera track is not live');
   }
 
-  const canvas = document.createElement('canvas');
-  canvas.width = videoEl.videoWidth;
-  canvas.height = videoEl.videoHeight;
+  const width = Math.min(videoEl.videoWidth || 1280, 1280);
+  const height = Math.max(Math.round(width * ((videoEl.videoHeight || 720) / (videoEl.videoWidth || 1280))), 1);
 
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(videoEl, 0, 0);
+  for (let attempt = 0; attempt < 4; attempt++) {
+    let canvas = null;
 
-  return canvas.toDataURL('image/png');
+    try {
+      canvas = await captureTrackFrame(track, width, height);
+    } catch (error) {
+      canvas = null;
+    }
+
+    if (!canvas) {
+      canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(videoEl, 0, 0, width, height);
+    }
+
+    if (!isFrameMostlyBlack(canvas)) {
+      drawPreviewFrame(canvas, canvas.width, canvas.height);
+      return canvas.toDataURL('image/jpeg', 0.92);
+    }
+
+    await wait(180);
+    await waitForVideoFrame();
+  }
+
+  throw new Error('Camera frame is still black');
 }
- initCamera();
+initCamera().catch((error) => {
+  console.error('Camera init failed', error);
+});
 // Uptime counter
 setInterval(() => {
   const s = Math.floor((Date.now() - startTime) / 1000);

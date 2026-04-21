@@ -3,7 +3,7 @@ const cors = require('cors');
 const express = require('express');
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 const { startWakeWordListener } = require('./wake-word');
 const { transcribe, recordAudio } = require('./stt');
@@ -248,10 +248,15 @@ app.listen(4001, () => {
 });
 
 app.post('/api/vision', async (req, res) => {
-  const { image } = req.body;
+  const { image, command } = req.body;
 
   if (!image) {
     return res.status(400).json({ error: 'Missing image' });
+  }
+
+  const imageMatch = image.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!imageMatch) {
+    return res.status(400).json({ error: 'Invalid image payload' });
   }
 
   try {
@@ -264,14 +269,16 @@ app.post('/api/vision', async (req, res) => {
           content: [
             {
               type: 'text',
-              text: 'Describe exactly what you see in this image for Trillian.'
+              text: command && command.trim()
+                ? 'The user asked: "' + command.trim() + '". Describe exactly what you see in this image for Trillian.'
+                : 'Describe exactly what you see in this image for Trillian.'
             },
             {
               type: 'image',
               source: {
                 type: 'base64',
-                media_type: 'image/png',
-                data: image.replace(/^data:image\/png;base64,/, '')
+                media_type: imageMatch[1],
+                data: imageMatch[2]
               }
             }
           ]
@@ -284,10 +291,14 @@ app.post('/api/vision', async (req, res) => {
       .map(block => block.text)
       .join(' ');
 
+    if (!text) {
+      return res.status(502).json({ error: 'Vision returned no text' });
+    }
+
     res.json({ reply: text });
   } catch (err) {
     console.error('[VISION ERROR]', err);
-    res.status(500).json({ error: 'Vision failed' });
+    res.status(500).json({ error: err.message || 'Vision failed' });
   }
 });
 
