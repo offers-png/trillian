@@ -198,7 +198,11 @@ async function initCamera() {
   videoEl.style.display = 'none';
   document.body.appendChild(videoEl);
 
-  videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+  videoStream = await navigator.mediaDevices.getUserMedia({
+  video: {
+    facingMode: "user" // or "environment" if external cam
+  }
+});
   videoEl.srcObject = videoStream;
 }
 
