@@ -160,7 +160,25 @@
 const ws = new WebSocket('ws://' + location.host);
 let convCount = 0;
 let startTime = Date.now();
+async function sendCommand(command) {
+  addMessage('user', command);
 
+  try {
+    const res = await fetch('http://localhost:4001/api/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command })
+    });
+
+    const data = await res.json();
+    addMessage('trillian', data.reply);
+  } catch (e) {
+    addMessage('trillian', 'Connection error.');
+  }
+}
+
+ window.sendCommand = sendCommand;
+ 
 // Uptime counter
 setInterval(() => {
   const s = Math.floor((Date.now() - startTime) / 1000);
