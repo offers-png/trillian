@@ -172,7 +172,31 @@ async function sendCommand(command) {
   }
 }
  window.sendCommand = sendCommand;
- 
+
+ let videoStream;
+let videoEl;
+
+async function initCamera() {
+  videoEl = document.createElement('video');
+  videoEl.autoplay = true;
+  videoEl.style.display = 'none';
+  document.body.appendChild(videoEl);
+
+  videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+  videoEl.srcObject = videoStream;
+}
+
+async function captureFrame() {
+  const canvas = document.createElement('canvas');
+  canvas.width = videoEl.videoWidth;
+  canvas.height = videoEl.videoHeight;
+
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(videoEl, 0, 0);
+
+  return canvas.toDataURL('image/png');
+}
+ initCamera();
 // Uptime counter
 setInterval(() => {
   const s = Math.floor((Date.now() - startTime) / 1000);
