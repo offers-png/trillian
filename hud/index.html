@@ -191,7 +191,7 @@ async function sendCommand(command) {
 
  let videoStream;
 let videoEl;
-
+ 
 async function initCamera() {
   videoEl = document.createElement('video');
   videoEl.autoplay = true;
@@ -199,12 +199,16 @@ async function initCamera() {
   videoEl.style.display = 'none';
   document.body.appendChild(videoEl);
 
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const cam = devices.find(d =>
+    d.kind === 'videoinput' &&
+    d.label.includes('USB Video Device')
+  );
+
   videoStream = await navigator.mediaDevices.getUserMedia({
-    video: {
-      deviceId: {
-        exact: '93ccfbb496c66eedb6922da77f890f4a1d7ff826b0877caffe3f27a1'
-      }
-    }
+    video: cam
+      ? { deviceId: { ideal: cam.deviceId } }
+      : true
   });
 
   videoEl.srcObject = videoStream;
