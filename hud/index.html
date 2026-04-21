@@ -220,10 +220,8 @@ async function initCamera() {
   document.body.appendChild(videoEl);
 
   const devices = await navigator.mediaDevices.enumerateDevices();
-  const cam = devices.find(d =>
-    d.kind === 'videoinput' &&
-    d.label.includes('USB Video Device')
-  );
+  const cams = devices.filter(d => d.kind === 'videoinput');
+  const cam = cams[0]; // just use first real camera
 
   videoStream = await navigator.mediaDevices.getUserMedia({
     video: cam ? { deviceId: { ideal: cam.deviceId } } : true
