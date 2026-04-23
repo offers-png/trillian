@@ -169,9 +169,19 @@ app.post('/api/command', async (req, res) => {
     return res.status(400).json({ error: 'Missing command' });
   }
 
-  if (command.toLowerCase().includes('what do you see')) {
-    return res.json({ action: 'vision' });
-  }
+  const lower = command.toLowerCase();
+
+if (
+  lower.includes('what do you see') ||
+  lower.includes('can you see me') ||
+  lower.includes('can you see') ||
+  lower.includes('look at me') ||
+  lower.includes('look through the camera') ||
+  lower.includes('use the camera') ||
+  lower.includes('see the camera')
+) {
+  return res.json({ action: 'vision' });
+}
 
   console.log('[API COMMAND]:', command);
 
