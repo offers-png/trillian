@@ -4,7 +4,7 @@ const express = require('express');
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
-
+const vision = require('./vision');
 const { startWakeWordListener } = require('./wake-word');
 const { transcribe, recordAudio } = require('./stt');
 const { speak, speakStream } = require('./tts');
@@ -62,7 +62,8 @@ async function handleVoiceInput(audioBuffer) {
       ? '\nContext:\n' + memories.map(m => '- ' + m.content).join('\n') : '';
 
     const systemPrompt = buildSystemPrompt(memCtx);
-    conversationHistory.push({ role: 'user', content: userText });
+    const userContent = vision.buildVisionMessages(userText);
+    conversationHistory.push({ role: 'user', content: userContent });
     if (conversationHistory.length > MAX_HISTORY)
       conversationHistory = conversationHistory.slice(-MAX_HISTORY);
 
