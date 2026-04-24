@@ -652,7 +652,74 @@ function activateWaveform(active) {
     if (active) b.style.animationDelay = (i * 0.1) + 's';
   });
 }
+ // ========== VISION FRAME CAPTURE ==========
+let visionInterval = null;
+let framesAttempted = 0;
+let framesSent = 0;
 
+function startVisionCapture() {
+  if (visionInterval) {
+    console.log('[HUD] Vision capture already running');
+    return;
+  }
+  
+  visionInterval = setInterval(() => {
+    const video = document.getElementById('cameraFeed');
+    if (!video || !video.srcObject || video.paused || video.readyState < 2) {
+      return;
+    }
+    
+    framesAttempted++;
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 640;
+      canvas.height = 480;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, 640, 480);
+      const frame = canvas.toDataURL('image/jpeg', 0.7);
+      
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ event: 'vision_frame', data: frame }));
+        framesSent++;
+        console.log('[HUD] Vision frame #' + framesSent + ' sent to backend');
+      } else {
+        console.warn('[HUD] WebSocket not ready (state: ' + (ws ? ws.readyState : 'null') + '), frame skipped');
+      }
+    } catch(e) {
+      console.error('[HUD] Vision capture error:', e);
+    }
+  }, 1000);
+  
+  console.log('[HUD] Vision capture started - sending frames every 1 second');
+}
+
+// Start vision capture when camera loads
+const cameraVideo = document.getElementById('cameraFeed');
+if (cameraVideo) {
+  cameraVideo.addEventListener('loadeddata', () => {
+    console.log('[HUD] Camera loaded, waiting 2s for WebSocket, then starting vision...');
+    setTimeout(() => {
+      if (ws && ws.readyState === 1) {
+        startVisionCapture();
+      } else {
+        console.warn('[HUD] WebSocket not ready after 2s, retrying in 3s...');
+        setTimeout(startVisionCapture, 3000);
+      }
+    }, 2000);
+  });
+}
+
+// Also try to start if camera is already loaded when this script runs
+if (cameraVideo && cameraVideo.readyState >= 2) {
+  console.log('[HUD] Camera already loaded, starting vision in 2s...');
+  setTimeout(() => {
+    if (ws && ws.readyState === 1) {
+      startVisionCapture();
+    } else {
+      setTimeout(startVisionCapture, 3000);
+    }
+  }, 2000);
+}
 // Auto-reconnect
 ws.onerror = () => setTimeout(() => location.reload(), 3000);
 </script>
