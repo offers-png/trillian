@@ -262,9 +262,11 @@ app.post('/api/telegram/webhook', async (req, res) => {
     const telegram = require('./integrations/telegram');
     const { chatId, text } = await telegram.handleUpdate(req.body);
     
-    if (!text) {
+    if (!text || !chatId) {
       return res.sendStatus(200);
     }
+    
+    console.log('[TELEGRAM] Message from', chatId, ':', text);
     
     // Process with Claude
     const response = await claude.messages.create({
@@ -275,18 +277,24 @@ app.post('/api/telegram/webhook', async (req, res) => {
       tools: getTools(),
     });
     
-    const reply = response.content
+    let reply = response.content
       .filter(b => b.type === 'text')
       .map(b => b.text)
-      .join(' ');
+      .join('\n\n');
+    
+    // Ensure reply is not empty
+    if (!reply || reply.trim().length === 0) {
+      reply = "I processed your message but didn't generate a text response.";
+    }
     
     // Send back to Telegram
     await telegram.sendMessage(chatId, reply);
     
-    console.log('[TELEGRAM] Sent:', reply.slice(0, 50) + '...');
+    console.log('[TELEGRAM] Sent:', reply.slice(0, 100) + '...');
     res.sendStatus(200);
   } catch(err) {
     console.error('[TELEGRAM] Error:', err.message);
+    console.error('[TELEGRAM] Stack:', err.stack);
     res.sendStatus(500);
   }
 });
