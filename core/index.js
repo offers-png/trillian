@@ -4,7 +4,7 @@ const express = require('express');
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
-const vision = require('./vision');
+
 const { startWakeWordListener } = require('./wake-word');
 const { transcribe, recordAudio } = require('./stt');
 const { speak, speakStream } = require('./tts');
@@ -13,6 +13,7 @@ const { getTools, executeTool } = require('./tools');
 const { morningBriefing } = require('./briefing');
 const Anthropic = require('@anthropic-ai/sdk');
 const cron = require('node-cron');
+const vision = require('./vision');
 
 const claude = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 let conversationHistory = [];
@@ -252,6 +253,41 @@ if (
   } finally {
     isProcessing = false;
     hud.updateState({ processing: false, listening: true });
+  }
+});
+
+// Telegram webhook endpoint
+app.post('/api/telegram/webhook', async (req, res) => {
+  try {
+    const telegram = require('./integrations/telegram');
+    const { chatId, text } = await telegram.handleUpdate(req.body);
+    
+    if (!text) {
+      return res.sendStatus(200);
+    }
+    
+    // Process with Claude
+    const response = await claude.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1024,
+      system: buildSystemPrompt(''),
+      messages: [{ role: 'user', content: text }],
+      tools: getTools(),
+    });
+    
+    const reply = response.content
+      .filter(b => b.type === 'text')
+      .map(b => b.text)
+      .join(' ');
+    
+    // Send back to Telegram
+    await telegram.sendMessage(chatId, reply);
+    
+    console.log('[TELEGRAM] Sent:', reply.slice(0, 50) + '...');
+    res.sendStatus(200);
+  } catch(err) {
+    console.error('[TELEGRAM] Error:', err.message);
+    res.sendStatus(500);
   }
 });
 
