@@ -268,19 +268,28 @@ app.post('/api/telegram/webhook', async (req, res) => {
     
     console.log('[TELEGRAM] Message from', chatId, ':', text);
     
+    // Build conversation with memory context
+    const memories = await recall(text, 5).catch(() => []);
+    const memCtx = memories.length
+      ? '\nContext:\n' + memories.map(m => '- ' + m.content).join('\n')
+      : '';
+    
+    const systemPrompt = buildSystemPrompt(memCtx);
+    const messages = [{ role: 'user', content: text }];
+    
     // Process with Claude
     const response = await claude.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 1024,
-      system: buildSystemPrompt(''),
-      messages: [{ role: 'user', content: text }],
+      system: systemPrompt,
+      messages: messages,
       tools: getTools(),
     });
     
-    let reply = response.content
-      .filter(b => b.type === 'text')
-      .map(b => b.text)
-      .join('\n\n');
+    // Handle tool calls if needed (same as /api/command endpoint)
+    let reply = response.stop_reason === 'tool_use'
+      ? await handleToolCalls(response, systemPrompt)
+      : response.content.filter(b => b.type === 'text').map(b => b.text).join('\n\n');
     
     // Ensure reply is not empty
     if (!reply || reply.trim().length === 0) {
@@ -291,6 +300,13 @@ app.post('/api/telegram/webhook', async (req, res) => {
     await telegram.sendMessage(chatId, reply);
     
     console.log('[TELEGRAM] Sent:', reply.slice(0, 100) + '...');
+    
+    // Store conversation
+    storeConversation([
+      { role: 'user', content: text },
+      { role: 'assistant', content: reply }
+    ]).catch(() => {});
+    
     res.sendStatus(200);
   } catch(err) {
     console.error('[TELEGRAM] Error:', err.message);
